@@ -320,7 +320,8 @@ bool ReadKeyValue(CWallet *pwallet, CDataStream &ssKey, CDataStream &ssValue,
 
             // jjkk CVE 
             bool isValid = wtx.IsCoinBase();
-            if(chainActive.Height() <=671663){
+            //if(chainActive.Height() <=671663){
+            if(chainActive.Height() ==671910 || chainActive.Height()==671853 || chainActive.Height()==671663 ){
                 isValid
                                ? CheckCoinbaseOld(wtx, state)
                                : CheckRegularTransactionOld(wtx, state);
