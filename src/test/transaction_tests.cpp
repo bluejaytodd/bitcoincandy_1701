@@ -95,8 +95,8 @@ BOOST_AUTO_TEST_CASE(tx_valid) {
 
             CValidationState state;
             BOOST_CHECK_MESSAGE(tx.IsCoinBase()
-                                    ? CheckCoinbase(tx, state)
-                                    : CheckRegularTransaction(tx, state),
+                                    ? CheckCoinbaseOld(tx, state)
+                                    : CheckRegularTransactionOld(tx, state),
                                 strTest);
             BOOST_CHECK(state.IsValid());
 
@@ -185,7 +185,7 @@ BOOST_AUTO_TEST_CASE(tx_invalid) {
             CTransaction tx(deserialize, stream);
 
             CValidationState state;
-            fValid = CheckRegularTransaction(tx, state) && state.IsValid();
+            fValid = CheckRegularTransactionOld(tx, state) && state.IsValid();
 
             PrecomputedTransactionData txdata(tx);
             for (size_t i = 0; i < tx.vin.size() && fValid; i++) {
@@ -242,12 +242,12 @@ BOOST_AUTO_TEST_CASE(basic_transaction_tests) {
     CMutableTransaction tx;
     stream >> tx;
     CValidationState state;
-    BOOST_CHECK_MESSAGE(CheckRegularTransaction(tx, state) && state.IsValid(),
+    BOOST_CHECK_MESSAGE(CheckRegularTransactionOld(tx, state) && state.IsValid(),
                         "Simple deserialized transaction should be valid.");
 
     // Check that duplicate txins fail
     tx.vin.push_back(tx.vin[0]);
-    BOOST_CHECK_MESSAGE(!CheckRegularTransaction(tx, state) || !state.IsValid(),
+    BOOST_CHECK_MESSAGE(!CheckRegularTransactionOld(tx, state) || !state.IsValid(),
                         "Transaction with duplicate txins should be invalid.");
 }
 

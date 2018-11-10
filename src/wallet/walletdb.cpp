@@ -317,9 +317,22 @@ bool ReadKeyValue(CWallet *pwallet, CDataStream &ssKey, CDataStream &ssValue,
             CWalletTx wtx;
             ssValue >> wtx;
             CValidationState state;
-            bool isValid = wtx.IsCoinBase()
-                               ? CheckCoinbase(wtx, state)
-                               : CheckRegularTransaction(wtx, state);
+
+            // jjkk CVE 
+            bool isValid = wtx.IsCoinBase();
+            if(chainActive.Height() <=671663){
+                isValid
+                               ? CheckCoinbaseOld(wtx, state)
+                               : CheckRegularTransactionOld(wtx, state);
+            }else{
+                isValid
+                               ? CheckCoinbaseCVE(wtx, state)
+                               : CheckRegularTransactionCVE(wtx, state);
+            };
+            //bool isValid = wtx.IsCoinBase()
+            //                   ? CheckCoinbase(wtx, state)
+            //                   : CheckRegularTransaction(wtx, state);
+
             if (wtx.GetId() != hash || !isValid) return false;
 
             // Undo serialize changes in 31600

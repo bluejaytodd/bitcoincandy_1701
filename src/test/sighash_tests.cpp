@@ -202,7 +202,8 @@ BOOST_AUTO_TEST_CASE(sighash_from_data) {
             stream >> tx;
 
             CValidationState state;
-            BOOST_CHECK_MESSAGE(CheckRegularTransaction(*tx, state), strTest);
+            // jjkk CVE
+            BOOST_CHECK_MESSAGE(CheckRegularTransactionOld(*tx, state), strTest);
             BOOST_CHECK(state.IsValid());
 
             std::vector<uint8_t> raw = ParseHex(raw_script);

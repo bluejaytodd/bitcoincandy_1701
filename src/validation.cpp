@@ -475,7 +475,63 @@ uint64_t GetTransactionSigOpCount(const CTransaction &tx,
     return nSigOps;
 }
 
-static bool CheckTransactionCommon(const CTransaction &tx,
+static bool CheckTransactionCommonOld(const CTransaction &tx,
+                                   CValidationState &state,
+                                   bool fCheckDuplicateInputs) {
+    // Basic checks that don't depend on any context
+    if (tx.vin.empty()) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-txns-vin-empty");
+    }
+
+    if (tx.vout.empty()) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-txns-vout-empty");
+    }
+
+    // Size limit
+    if (::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION) > MAX_TX_SIZE) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-txns-oversize");
+    }
+
+    // Check for negative or overflow output values
+    Amount nValueOut(0);
+    for (const auto &txout : tx.vout) {
+        if (txout.nValue < Amount(0)) {
+            return state.DoS(100, false, REJECT_INVALID,
+                             "bad-txns-vout-negative");
+        }
+
+        if (txout.nValue > MAX_MONEY) {
+            return state.DoS(100, false, REJECT_INVALID,
+                             "bad-txns-vout-toolarge");
+        }
+
+        nValueOut += txout.nValue;
+        if (!MoneyRange(nValueOut)) {
+            return state.DoS(100, false, REJECT_INVALID,
+                             "bad-txns-txouttotal-toolarge");
+        }
+    }
+
+    if (GetSigOpCountWithoutP2SH(tx) > MAX_TX_SIGOPS_COUNT) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-txn-sigops");
+    } 
+
+    // Check for duplicate inputs - note that this check is slow so we skip it
+    // in CheckBlock
+    if (fCheckDuplicateInputs) {
+        std::set<COutPoint> vInOutPoints;
+        for (const auto &txin : tx.vin) {
+            if (!vInOutPoints.insert(txin.prevout).second) {
+                return state.DoS(100, false, REJECT_INVALID,
+                                 "bad-txns-inputs-duplicate");
+            }
+        }
+    }
+
+    return true;
+}
+
+static bool CheckTransactionCommonCVE(const CTransaction &tx,
                                    CValidationState &state) {
     // Basic checks that don't depend on any context
     if (tx.vin.empty()) {
@@ -519,14 +575,13 @@ static bool CheckTransactionCommon(const CTransaction &tx,
 
     return true;
 }
-
-bool CheckCoinbase(const CTransaction &tx, CValidationState &state) {
+bool CheckCoinbaseOld(const CTransaction &tx, CValidationState &state,
+                   bool fCheckDuplicateInputs) {
     if (!tx.IsCoinBase()) {
         return state.DoS(100, false, REJECT_INVALID, "bad-cb-missing", false,
                          "first tx is not coinbase");
     }
-
-    if (!CheckTransactionCommon(tx, state)) {
+    if (!CheckTransactionCommonOld(tx, state, fCheckDuplicateInputs)) {
         // CheckTransactionCommon fill in the state.
         return false;
     }
@@ -538,12 +593,55 @@ bool CheckCoinbase(const CTransaction &tx, CValidationState &state) {
     return true;
 }
 
-bool CheckRegularTransaction(const CTransaction &tx, CValidationState &state) {
+bool CheckCoinbaseCVE(const CTransaction &tx, CValidationState &state) {
+    if (!tx.IsCoinBase()) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-cb-missing", false,
+                         "first tx is not coinbase");
+    }
+
+    if (!CheckTransactionCommonCVE(tx, state)) {
+        // CheckTransactionCommon fill in the state.
+        return false;
+    }
+
+    if (tx.vin[0].scriptSig.size() < 2 || tx.vin[0].scriptSig.size() > 100) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-cb-length");
+    }
+
+    return true;
+}
+
+bool CheckRegularTransactionOld(const CTransaction &tx, CValidationState &state,
+                             bool fCheckDuplicateInputs) {
     if (tx.IsCoinBase()) {
         return state.DoS(100, false, REJECT_INVALID, "bad-tx-coinbase");
     }
 
-    if (!CheckTransactionCommon(tx, state)) {
+    if (!CheckTransactionCommonOld(tx, state, fCheckDuplicateInputs)) {
+        // CheckTransactionCommon fill in the state.
+        return false;
+    }
+
+    //std::unordered_set<COutPoint, SaltedOutpointHasher> vInOutPoints;
+    for (const auto &txin : tx.vin) {
+        if (txin.prevout.IsNull()) {
+            return state.DoS(10, false, REJECT_INVALID,
+                             "bad-txns-prevout-null");
+        }
+        //if (!vInOutPoints.insert(txin.prevout).second) {
+        //    return state.DoS(100, false, REJECT_INVALID,
+        //                     "bad-txns-inputs-duplicate");
+        //}
+    }
+
+    return true;
+}
+bool CheckRegularTransactionCVE(const CTransaction &tx, CValidationState &state) {
+    if (tx.IsCoinBase()) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-tx-coinbase");
+    }
+
+    if (!CheckTransactionCommonCVE(tx, state)) {
         // CheckTransactionCommon fill in the state.
         return false;
     }
@@ -707,10 +805,19 @@ static bool AcceptToMemoryPoolWorker(
     }
 
     // Coinbase is only valid in a block, not as a loose transaction.
-    if (!CheckRegularTransaction(tx, state)) {
-        // state filled in by CheckRegularTransaction.
-        return false;
-    }
+    // jjkk CVE
+    //if(chainActive.Height() <=671910){
+    if(chainActive.Height() ==671910 || chainActive.Height()==671853 || chainActive.Height()==671663 ){
+      if (!CheckRegularTransactionOld(tx, state, true)) {
+          // state filled in by CheckRegularTransaction.
+          return false;
+      }
+    }else{
+      if (!CheckRegularTransactionCVE(tx, state)) {
+          // state filled in by CheckRegularTransaction.
+          return false;
+      }
+    };
 
     // After the May, 15 hard fork, we start accepting larger op_return.
     const bool hasMonolith = IsMonolithEnabled(config, chainActive.Tip());
@@ -3386,13 +3493,25 @@ bool CheckBlock(const Config &config, const CBlock &block,
     }
 
     // And a valid coinbase.
-    if (!CheckCoinbase(*block.vtx[0], state)) {
+    // jjkk CVE
+    //if(chainActive.Height()<=671910){
+    if(chainActive.Height() ==671910 || chainActive.Height()==671853 || chainActive.Height()==671663 ){
+    if (!CheckCoinbaseOld(*block.vtx[0], state, false)) {
         return state.Invalid(false, state.GetRejectCode(),
                              state.GetRejectReason(),
                              strprintf("Coinbase check failed (txid %s) %s",
                                        block.vtx[0]->GetId().ToString(),
                                        state.GetDebugMessage()));
     }
+    }else{
+    if (!CheckCoinbaseCVE(*block.vtx[0], state)) {
+        return state.Invalid(false, state.GetRejectCode(),
+                             state.GetRejectReason(),
+                             strprintf("Coinbase check failed (txid %s) %s",
+                                       block.vtx[0]->GetId().ToString(),
+                                       state.GetDebugMessage()));
+    }
+    };
 
     // Keep track of the sigops count.
     uint64_t nSigOps = 0;
@@ -3424,12 +3543,23 @@ bool CheckBlock(const Config &config, const CBlock &block,
         // the coinbase, the loos is arranged such as this only runs after at
         // least one increment.
         tx = block.vtx[i].get();
-        if (!CheckRegularTransaction(*tx, state)) {
+        // jjkk CVE
+        //if(chainActive.Height() <=671910){
+        if(chainActive.Height() ==671910 || chainActive.Height()==671853 || chainActive.Height()==671663 ){
+        if (!CheckRegularTransactionOld(*tx, state, false)) {
             return state.Invalid(
                 false, state.GetRejectCode(), state.GetRejectReason(),
                 strprintf("Transaction check failed (txid %s) %s",
                           tx->GetId().ToString(), state.GetDebugMessage()));
         }
+        }else{
+        if (!CheckRegularTransactionCVE(*tx, state)) {
+            return state.Invalid(
+                false, state.GetRejectCode(), state.GetRejectReason(),
+                strprintf("Transaction check failed (txid %s) %s",
+                          tx->GetId().ToString(), state.GetDebugMessage()));
+        }
+        };
     }
 
     if (fCheckPOW && fCheckMerkleRoot) {
