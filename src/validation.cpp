@@ -1812,6 +1812,10 @@ DisconnectResult UndoCoinSpend(const Coin &undo, CCoinsViewCache &view,
     // When fClean is false, a coin already existed and it is an overwrite.
     view.AddCoin(out, std::move(undo), !fClean);
 
+    // jjkk CVE
+    if(chainActive.Height() ==671910 || chainActive.Height()==671853 || chainActive.Height()==671663 ){
+        fClean = true; 
+    };
     return fClean ? DISCONNECT_OK : DISCONNECT_UNCLEAN;
 }
 
