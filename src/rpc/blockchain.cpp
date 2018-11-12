@@ -1634,6 +1634,50 @@ UniValue invalidateblock(const Config &config, const JSONRPCRequest &request) {
     return NullUniValue;
 }
 
+UniValue invalidateblockds(const Config &config, const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() != 1) {
+        throw std::runtime_error(
+            "invalidateblockds \"blockhash\"\n"
+            "\nPermanently marks a block as invalid, as if it "
+            "violated a consensus rule.\n"
+            "\nArguments:\n"
+            "1. \"blockhash\"   (string, required) the hash of "
+            "the block to mark as invalid\n"
+            "\nResult:\n"
+            "\nExamples:\n" +
+            HelpExampleCli("invalidateblockds", "\"blockhash\"") +
+            HelpExampleRpc("invalidateblockds", "\"blockhash\""));
+    }
+
+    std::string strHash = request.params[0].get_str();
+    uint256 hash(uint256S(strHash));
+    CValidationState state;
+
+    {
+        LOCK(cs_main);
+        if (mapBlockIndex.count(hash) == 0) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
+        }
+
+        CBlockIndex *pblockindex = mapBlockIndex[hash];
+        if( pblockindex->nHeight == 671663 || pblockindex->nHeight == 671853 || pblockindex->nHeight == 671910 ){
+            InvalidateBlockds(config, state, pblockindex);
+        }else{
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block is not double spending:671663 671853 671910");
+        };
+    }
+
+    if (state.IsValid()) {
+        ActivateBestChain(config, state);
+    }
+
+    if (!state.IsValid()) {
+        throw JSONRPCError(RPC_DATABASE_ERROR, state.GetRejectReason());
+    }
+
+    return NullUniValue;
+}
+
 UniValue reconsiderblock(const Config &config, const JSONRPCRequest &request) {
     if (request.fHelp || request.params.size() != 1) {
         throw std::runtime_error(
@@ -1698,6 +1742,7 @@ static const CRPCCommand commands[] = {
 
     /* Not shown in help */
     { "hidden",             "invalidateblock",        invalidateblock,        true,  {"blockhash"} },
+    { "hidden",             "invalidateblockds",      invalidateblockds,      true,  {"blockhash"} },
     { "hidden",             "reconsiderblock",        reconsiderblock,        true,  {"blockhash"} },
     { "hidden",             "waitfornewblock",        waitfornewblock,        true,  {"timeout"} },
     { "hidden",             "waitforblock",           waitforblock,           true,  {"blockhash","timeout"} },

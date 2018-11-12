@@ -133,12 +133,17 @@ enum DisconnectResult {
  */
 DisconnectResult UndoCoinSpend(const Coin &undo, CCoinsViewCache &view,
                                const COutPoint &out);
+DisconnectResult UndoCoinSpendds(const Coin &undo, CCoinsViewCache &view,
+                               const COutPoint &out);
 
 /**
  * Undo a block from the block and the undoblock data.
  * See DisconnectBlock for more details.
  */
 DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
+                                const CBlock &block, const CBlockIndex *pindex,
+                                CCoinsViewCache &coins);
+DisconnectResult ApplyBlockUndods(const CBlockUndo &blockUndo,
                                 const CBlock &block, const CBlockIndex *pindex,
                                 CCoinsViewCache &coins);
 

@@ -1818,6 +1818,46 @@ DisconnectResult UndoCoinSpend(const Coin &undo, CCoinsViewCache &view,
     //};
     return fClean ? DISCONNECT_OK : DISCONNECT_UNCLEAN;
 }
+DisconnectResult UndoCoinSpendds(const Coin &undo, CCoinsViewCache &view,
+                               const COutPoint &out) {
+    bool fClean = true;
+
+    if (view.HaveCoin(out)) {
+        // Overwriting transaction output.
+        fClean = false;
+    }
+
+    if (undo.GetHeight() == 0) {
+        // Missing undo metadata (height and coinbase). Older versions included
+        // this information only in undo records for the last spend of a
+        // transactions' outputs. This implies that it must be present for some
+        // other output of the same tx.
+        const Coin &alternate = AccessByTxid(view, out.hash);
+        if (alternate.IsSpent()) {
+            // Adding output for transaction without known metadata
+            return DISCONNECT_FAILED;
+        }
+
+        // This is somewhat ugly, but hopefully utility is limited. This is only
+        // useful when working from legacy on disck data. In any case, putting
+        // the correct information in there doesn't hurt.
+        const_cast<Coin &>(undo) = Coin(undo.GetTxOut(), alternate.GetHeight(),
+                                        alternate.IsCoinBase());
+    }
+
+    // The potential_overwrite parameter to AddCoin is only allowed to be false
+    // if we know for sure that the coin did not already exist in the cache. As
+    // we have queried for that above using HaveCoin, we don't need to guess.
+    // When fClean is false, a coin already existed and it is an overwrite.
+    if( true == fClean ) 
+    view.AddCoinds(out, std::move(undo), !fClean);
+
+    //  CVE
+    if(chainActive.Height() ==671910 || chainActive.Height()==671853 || chainActive.Height()==671663 ){
+        fClean = true; 
+    };
+    return fClean ? DISCONNECT_OK : DISCONNECT_UNCLEAN;
+}
 
 /**
  * Undo the effects of this block (with given index) on the UTXO set represented
@@ -1840,6 +1880,23 @@ static DisconnectResult DisconnectBlock(const CBlock &block,
     }
 
     return ApplyBlockUndo(blockUndo, block, pindex, view);
+}
+static DisconnectResult DisconnectBlockds(const CBlock &block,
+                                        const CBlockIndex *pindex,
+                                        CCoinsViewCache &view) {
+    CBlockUndo blockUndo;
+    CDiskBlockPos pos = pindex->GetUndoPos();
+    if (pos.IsNull()) {
+        error("DisconnectBlock(): no undo data available");
+        return DISCONNECT_FAILED;
+    }
+
+    if (!UndoReadFromDisk(blockUndo, pos, pindex->pprev->GetBlockHash())) {
+        error("DisconnectBlock(): failure reading undo data");
+        return DISCONNECT_FAILED;
+    }
+
+    return ApplyBlockUndods(blockUndo, block, pindex, view);
 }
 
 DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
@@ -1890,6 +1947,66 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
             const COutPoint &out = tx.vin[j].prevout;
             const Coin &undo = txundo.vprevout[j];
             DisconnectResult res = UndoCoinSpend(undo, view, out);
+            if (res == DISCONNECT_FAILED) {
+                return DISCONNECT_FAILED;
+            }
+            fClean = fClean && res != DISCONNECT_UNCLEAN;
+        }
+    }
+
+    // Move best block pointer to previous block.
+    view.SetBestBlock(block.hashPrevBlock);
+
+    return fClean ? DISCONNECT_OK : DISCONNECT_UNCLEAN;
+}
+DisconnectResult ApplyBlockUndods(const CBlockUndo &blockUndo,
+                                const CBlock &block, const CBlockIndex *pindex,
+                                CCoinsViewCache &view) {
+    bool fClean = true;
+
+    if (blockUndo.vtxundo.size() + 1 != block.vtx.size()) {
+        error("DisconnectBlock(): block and undo data inconsistent");
+        return DISCONNECT_FAILED;
+    }
+
+    // Undo transactions in reverse order.
+    size_t i = block.vtx.size();
+    while (i-- > 0) {
+        const CTransaction &tx = *(block.vtx[i]);
+        uint256 txid = tx.GetId();
+
+        // Check that all outputs are available and match the outputs in the
+        // block itself exactly.
+        for (size_t o = 0; o < tx.vout.size(); o++) {
+            if (tx.vout[o].scriptPubKey.IsUnspendable()) {
+                continue;
+            }
+
+            COutPoint out(txid, o);
+            Coin coin;
+            bool is_spent = view.SpendCoin(out, &coin);
+            if (!is_spent || tx.vout[o] != coin.GetTxOut()) {
+                // transaction output mismatch
+                fClean = false;
+            }
+        }
+
+        // Restore inputs.
+        if (i < 1) {
+            // Skip the coinbase.
+            continue;
+        }
+
+        const CTxUndo &txundo = blockUndo.vtxundo[i - 1];
+        if (txundo.vprevout.size() != tx.vin.size()) {
+            error("DisconnectBlock(): transaction and undo data inconsistent");
+            return DISCONNECT_FAILED;
+        }
+
+        for (size_t j = tx.vin.size(); j-- > 0;) {
+            const COutPoint &out = tx.vin[j].prevout;
+            const Coin &undo = txundo.vprevout[j];
+            DisconnectResult res = UndoCoinSpendds(undo, view, out);
             if (res == DISCONNECT_FAILED) {
                 return DISCONNECT_FAILED;
             }
@@ -2700,6 +2817,87 @@ static bool DisconnectTip(const Config &config, CValidationState &state,
     }
     return true;
 }
+static bool DisconnectTipds(const Config &config, CValidationState &state,
+                          bool fBare = false) {
+    CBlockIndex *pindexDelete = chainActive.Tip();
+    assert(pindexDelete);
+
+    // Read block from disk.
+    std::shared_ptr<CBlock> pblock = std::make_shared<CBlock>();
+    CBlock &block = *pblock;
+    if (!ReadBlockFromDisk(block, pindexDelete, config)) {
+        return AbortNode(state, "Failed to read block");
+    }
+
+    // Apply the block atomically to the chain state.
+    int64_t nStart = GetTimeMicros();
+    {
+        CCoinsViewCache view(pcoinsTip);
+        assert(view.GetBestBlock() == pindexDelete->GetBlockHash());
+        if (DisconnectBlockds(block, pindexDelete, view) != DISCONNECT_OK) {
+            return error("DisconnectTip(): DisconnectBlockds %s failed",
+                         pindexDelete->GetBlockHash().ToString());
+        }
+
+        bool flushed = view.Flush();
+        assert(flushed);
+    }
+
+    LogPrint("bench", "- Disconnect block: %.2fms\n",
+             (GetTimeMicros() - nStart) * 0.001);
+
+    // Write the chain state to disk, if necessary.
+    if (!FlushStateToDisk(state, FLUSH_STATE_IF_NEEDED)) {
+        return false;
+    }
+
+        // If this block was deactivating the replay protection, then we need to
+    // remove transactions that are replay protected from the mempool. There is
+    // no easy way to do this so we'll just discard the whole mempool and then
+    // add the transaction of the block we just disconnected back.
+    //
+    // Samewise, if this block enabled the monolith opcodes, then we need to
+    // clear the mempool of any transaction using them.
+    if ((IsMonolithEnabled(config, pindexDelete) &&
+         !IsMonolithEnabled(config, pindexDelete->pprev))) {
+        mempool.clear();
+    }
+    //Yang ?
+    
+    if (!fBare) {
+        // Resurrect mempool transactions from the disconnected block.
+        std::vector<uint256> vHashUpdate;
+        for (const auto &it : block.vtx) {
+            const CTransaction &tx = *it;
+            // ignore validation errors in resurrected transactions
+            CValidationState stateDummy;
+            if (tx.IsCoinBase() ||
+                !AcceptToMemoryPool(config, mempool, stateDummy, it, false,
+                                    nullptr, true)) {
+                mempool.removeRecursive(tx, MemPoolRemovalReason::REORG);
+            } else if (mempool.exists(tx.GetId())) {
+                vHashUpdate.push_back(tx.GetId());
+            }
+        }
+        // AcceptToMemoryPool/addUnchecked all assume that new mempool entries
+        // have no in-mempool children, which is generally not true when adding
+        // previously-confirmed transactions back to the mempool.
+        // UpdateTransactionsFromBlock finds descendants of any transactions in
+        // this block that were added back and cleans up the mempool state.
+        mempool.UpdateTransactionsFromBlock(vHashUpdate);
+    }
+
+    // Update chainActive and related variables.
+    UpdateTip(config, pindexDelete->pprev);
+    // Let wallets know transactions went from 1-confirmed to
+    // 0-confirmed or conflicted:
+    for (const auto &tx : block.vtx) {
+        GetMainSignals().SyncTransaction(
+            *tx, pindexDelete->pprev,
+            CMainSignals::SYNC_TRANSACTION_NOT_IN_BLOCK);
+    }
+    return true;
+}
 
 static int64_t nTimeReadFromDisk = 0;
 static int64_t nTimeConnectTotal = 0;
@@ -3141,6 +3339,54 @@ bool InvalidateBlock(const Config &config, CValidationState &state,
         // ActivateBestChain considers blocks already in chainActive
         // unconditionally valid already, so force disconnect away from it.
         if (!DisconnectTip(config, state)) {
+            mempool.removeForReorg(config, pcoinsTip,
+                                   chainActive.Tip()->nHeight + 1,
+                                   STANDARD_LOCKTIME_VERIFY_FLAGS);
+            return false;
+        }
+    }
+
+    LimitMempoolSize(
+        mempool, GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000,
+        GetArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY) * 60 * 60);
+
+    // The resulting new best tip may not be in setBlockIndexCandidates anymore,
+    // so add it again.
+    BlockMap::iterator it = mapBlockIndex.begin();
+    while (it != mapBlockIndex.end()) {
+        if (it->second->IsValid(BLOCK_VALID_TRANSACTIONS) &&
+            it->second->nChainTx &&
+            !setBlockIndexCandidates.value_comp()(it->second,
+                                                  chainActive.Tip())) {
+            setBlockIndexCandidates.insert(it->second);
+        }
+        it++;
+    }
+
+    InvalidChainFound(pindex);
+    mempool.removeForReorg(config, pcoinsTip, chainActive.Tip()->nHeight + 1,
+                           STANDARD_LOCKTIME_VERIFY_FLAGS);
+    uiInterface.NotifyBlockTip(IsInitialBlockDownload(), pindex->pprev);
+    return true;
+}
+
+bool InvalidateBlockds(const Config &config, CValidationState &state,
+                     CBlockIndex *pindex) {
+    AssertLockHeld(cs_main);
+
+    // Mark the block itself as invalid.
+    pindex->nStatus |= BLOCK_FAILED_VALID;
+    setDirtyBlockIndex.insert(pindex);
+    setBlockIndexCandidates.erase(pindex);
+
+    while (chainActive.Contains(pindex)) {
+        CBlockIndex *pindexWalk = chainActive.Tip();
+        pindexWalk->nStatus |= BLOCK_FAILED_CHILD;
+        setDirtyBlockIndex.insert(pindexWalk);
+        setBlockIndexCandidates.erase(pindexWalk);
+        // ActivateBestChain considers blocks already in chainActive
+        // unconditionally valid already, so force disconnect away from it.
+        if (!DisconnectTipds(config, state)) {
             mempool.removeForReorg(config, pcoinsTip,
                                    chainActive.Tip()->nHeight + 1,
                                    STANDARD_LOCKTIME_VERIFY_FLAGS);

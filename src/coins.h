@@ -223,6 +223,8 @@ public:
      */
     void AddCoin(const COutPoint &outpoint, Coin coin,
                  bool potential_overwrite);
+    void AddCoinds(const COutPoint &outpoint, Coin coin,
+                 bool potential_overwrite);
 
     /**
      * Spend a coin. Pass moveto in order to get the deleted data.

@@ -121,6 +121,33 @@ void CCoinsViewCache::AddCoin(const COutPoint &outpoint, Coin coin,
         CCoinsCacheEntry::DIRTY | (fresh ? CCoinsCacheEntry::FRESH : 0);
     cachedCoinsUsage += it->second.coin.DynamicMemoryUsage();
 }
+void CCoinsViewCache::AddCoinds(const COutPoint &outpoint, Coin coin,
+                              bool possible_overwrite) {
+    assert(!coin.IsSpent());
+    if (coin.GetTxOut().scriptPubKey.IsUnspendable()) {
+        return;
+    }
+    CCoinsMap::iterator it;
+    bool inserted;
+    std::tie(it, inserted) =
+        cacheCoins.emplace(std::piecewise_construct,
+                           std::forward_as_tuple(outpoint), std::tuple<>());
+    bool fresh = false;
+    if (!inserted) {
+        cachedCoinsUsage -= it->second.coin.DynamicMemoryUsage();
+    }
+    if (!possible_overwrite) {
+        if (!it->second.coin.IsSpent()) {
+            throw std::logic_error(
+                "Adding new coin that replaces non-pruned entry");
+        }
+        fresh = !(it->second.flags & CCoinsCacheEntry::DIRTY);
+    }
+    it->second.coin = std::move(coin);
+    it->second.flags |=
+        CCoinsCacheEntry::DIRTY | (fresh ? CCoinsCacheEntry::FRESH : 0);
+    cachedCoinsUsage += it->second.coin.DynamicMemoryUsage();
+}
 
 void AddCoins(CCoinsViewCache &cache, const CTransaction &tx, int nHeight) {
     bool fCoinbase = tx.IsCoinBase();

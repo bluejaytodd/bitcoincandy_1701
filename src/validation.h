@@ -631,6 +631,9 @@ bool PreciousBlock(const Config &config, CValidationState &state,
 /** Mark a block as invalid. */
 bool InvalidateBlock(const Config &config, CValidationState &state,
                      CBlockIndex *pindex);
+/** Mark a block as invalid. */
+bool InvalidateBlockds(const Config &config, CValidationState &state,
+                     CBlockIndex *pindex);
 
 /** Remove invalidity status from a block and its descendants. */
 bool ResetBlockFailureFlags(CBlockIndex *pindex);
